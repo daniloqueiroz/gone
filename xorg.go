@@ -1,5 +1,5 @@
 // Gone Time Tracker -or- Where has my time gone?
-package main
+package gone
 
 import (
 	"bytes"

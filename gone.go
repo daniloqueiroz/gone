@@ -1,5 +1,5 @@
 // Gone Time Tracker -or- Where has my time gone?
-package main
+package gone
 
 //go:generate esc -o static.go static/
 
@@ -7,9 +7,9 @@ import (
 	"encoding/gob"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
-	"path"
 	"time"
 )
 
@@ -20,11 +20,6 @@ type Track struct {
 	Spent time.Duration
 	Idle  time.Duration
 }
-
-var (
-	dumpFileName = path.Join(CachePath(), "gone.gob")
-	logFileName  = path.Join(CachePath(), "gone.log")
-)
 
 var (
 	tracks  Tracks
@@ -125,42 +120,35 @@ func (t Tracks) Store(fname string) {
 	os.Rename(tmp, fname)
 }
 
-func (t Tracks) Cleanup(every, since time.Duration) {
+func (t Tracks) Cleanup(file string, every, since time.Duration) {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
 	for range tick.C {
 		t.RemoveSince(since)
-		t.Store(dumpFileName)
+		t.Store(file)
 	}
+}
+
+func StartTracker(display, trackingFile string) {
+	X := Connect(display)
+	defer X.Close()
+
+	logger = log.New(ioutil.Discard, "", log.LstdFlags)
+
+	tracks = Load(trackingFile)
+	defer tracks.Store(trackingFile)
+
+	go X.Collect(tracks, time.Minute*5)
+	go tracks.Cleanup(trackingFile, time.Minute, time.Hour*8)
+
+	select {}
 }
 
 func main() {
 	var (
 		display = flag.String("display", os.Getenv("DISPLAY"), "X11 display")
-		listen  = flag.String("listen", "127.0.0.1:8001", "web reporter")
-		timeout = flag.Duration("timeout", time.Minute*5, "idle timeout")
-		expire  = flag.Duration("expire", time.Hour*8, "expire timeout")
-		refresh = flag.Duration("refresh", time.Minute, "refresh interval")
+		file = flag.String("file", "/tmp/track.bin", "tracking file")
 	)
 	flag.Parse()
-
-	X := Connect(*display)
-	defer X.Close()
-
-	logfile, err := os.OpenFile(logFileName, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer logfile.Close()
-	logger = log.New(logfile, "", log.LstdFlags)
-
-	tracks = Load(dumpFileName)
-	defer tracks.Store(dumpFileName)
-
-	go X.Collect(tracks, *timeout)
-	go tracks.Cleanup(*refresh, *expire)
-
-	if err := webReporter(*listen); err != nil {
-		log.Fatal(err)
-	}
+	StartTracker(*display, *file)
 }
