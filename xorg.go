@@ -12,6 +12,13 @@ import (
 	"github.com/BurntSushi/xgb/xproto"
 )
 
+type WindowTracker interface {
+	Update(Window)
+	Snooze(time.Duration)
+	Wakeup()
+}
+
+
 type Xorg struct {
 	conn        *xgb.Conn
 	root        xproto.Window
@@ -24,12 +31,6 @@ type Xorg struct {
 type Window struct {
 	Class string
 	Name  string
-}
-
-type Tracker interface {
-	Update(Window)
-	Snooze(time.Duration)
-	Wakeup()
 }
 
 var (
@@ -163,7 +164,7 @@ func (x Xorg) queryIdle() time.Duration {
 	return time.Duration(info.MsSinceUserInput) * time.Millisecond
 }
 
-func (x Xorg) Collect(t Tracker, timeout time.Duration) {
+func (x Xorg) Collect(t WindowTracker, timeout time.Duration) {
 	if win, ok := x.window(); ok {
 		t.Update(win)
 	}

@@ -5,15 +5,14 @@ package gone
 
 import (
 	"encoding/gob"
-	"flag"
 	"fmt"
-	"io/ioutil"
-	"log"
 	"os"
 	"time"
 )
 
-type Tracks map[Window]Track
+func (w Window) String() string {
+	return fmt.Sprintf("%s %s", w.Class, w.Name)
+}
 
 type Track struct {
 	Seen  time.Time
@@ -21,134 +20,129 @@ type Track struct {
 	Idle  time.Duration
 }
 
-var (
-	tracks  Tracks
-	current Window
-	logger  *log.Logger
-	zzz     bool
-)
-
 func (t Track) String() string {
 	return fmt.Sprintf("%s %s", t.Seen.Format("2006/01/02 15:04:05"), t.Spent)
 }
 
-func (w Window) String() string {
-	return fmt.Sprintf("%s %s", w.Class, w.Name)
+type Tracker struct {
+	x       Xorg
+	tracks  map[Window]Track
+	current Window
+	zzz     bool
+	file    string
 }
 
-func (t Tracks) Snooze(idle time.Duration) {
-	if !zzz {
-		logger.Println("away from keyboard, idle for", idle)
-		if c, ok := t[current]; ok {
+func (t Tracker) Snooze(idle time.Duration) {
+	if !t.zzz {
+		if c, ok := t.tracks[t.current]; ok {
 			c.Idle += idle
-			t[current] = c
+			t.tracks[t.current] = c
 		}
-		zzz = true
+		t.zzz = true
 	}
 }
 
-func (t Tracks) Wakeup() {
-	if zzz {
-		logger.Println("back to keyboard")
-		if c, ok := t[current]; ok {
+func (t Tracker) Wakeup() {
+	if t.zzz {
+		if c, ok := t.tracks[t.current]; ok {
 			c.Seen = time.Now()
-			t[current] = c
+			t.tracks[t.current] = c
 		}
-		zzz = false
+		t.zzz = false
 	}
 }
 
-func (t Tracks) Update(w Window) {
-	if !zzz {
-		if c, ok := t[current]; ok {
+func (t Tracker) Update(w Window) {
+	if !t.zzz {
+		if c, ok := t.tracks[t.current]; ok {
 			c.Spent += time.Since(c.Seen)
-			t[current] = c
+			t.tracks[t.current] = c
 		}
 	}
 
-	if _, ok := t[w]; !ok {
-		t[w] = Track{}
+	if _, ok := t.tracks[w]; !ok {
+		t.tracks[w] = Track{}
 	}
 
-	s := t[w]
+	s := t.tracks[w]
 	s.Seen = time.Now()
-	t[w] = s
+	t.tracks[w] = s
 
-	current = w
+	t.current = w
 }
 
-func (t Tracks) RemoveSince(d time.Duration) {
-	for k, v := range t {
+func (t Tracker) removeSince(d time.Duration) {
+	for k, v := range t.tracks {
 		if time.Since(v.Seen) > d || v.Idle > d {
-			logger.Println(v, k)
-			delete(t, k)
+			delete(t.tracks, k)
 		}
 	}
 }
 
-func Load(fname string) Tracks {
-	t := make(Tracks)
-	dump, err := os.Open(fname)
+func (t Tracker) load() error {
+	dump, err := os.Open(t.file)
 	if err != nil {
-		log.Println(err)
-		return t
+		return err
 	}
 	defer dump.Close()
 	dec := gob.NewDecoder(dump)
-	err = dec.Decode(&t)
+	err = dec.Decode(&t.tracks)
 	if err != nil {
-		log.Println(err)
+		return nil
 	}
-	return t
+
+	return nil
 }
 
-func (t Tracks) Store(fname string) {
-	tmp := fname + ".tmp"
+func (t Tracker) store() error {
+	tmp := t.file + ".tmp"
 	dump, err := os.Create(tmp)
 	if err != nil {
-		log.Println(err)
-		return
+		return err
 	}
 	defer dump.Close()
 	enc := gob.NewEncoder(dump)
-	err = enc.Encode(t)
+	err = enc.Encode(t.tracks)
 	if err != nil {
-		log.Println(err)
 		os.Remove(tmp)
-		return
+		return err
 	}
-	os.Rename(tmp, fname)
+	os.Rename(tmp, t.file)
+	return nil
 }
 
-func (t Tracks) Cleanup(file string, every, since time.Duration) {
+func (t Tracker) Cleanup(every, since time.Duration) {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
 	for range tick.C {
-		t.RemoveSince(since)
-		t.Store(file)
+		t.removeSince(since)
+		t.store()
 	}
 }
 
-func StartTracker(display, trackingFile string) {
+func (t Tracker) Start() {
+	defer t.store()
+
+	go t.x.Collect(t, time.Minute*5)
+	go t.Cleanup(time.Minute, time.Hour*24*7)
+}
+
+func NewTracker(display, trackingFile string) (*Tracker, error) {
 	X := Connect(display)
 	defer X.Close()
+	var w Window
 
-	logger = log.New(ioutil.Discard, "", log.LstdFlags)
-
-	tracks = Load(trackingFile)
-	defer tracks.Store(trackingFile)
-
-	go X.Collect(tracks, time.Minute*5)
-	go tracks.Cleanup(trackingFile, time.Minute, time.Hour*8)
-
-	select {}
+	tracker := &Tracker{
+		x:       X,
+		tracks:  make(map[Window]Track),
+		current: w,
+		zzz:     false,
+		file:    trackingFile,
+	}
+	err := tracker.load()
+	if err != nil {
+		return nil, err
+	}
+	return tracker, nil
 }
 
-func main() {
-	var (
-		display = flag.String("display", os.Getenv("DISPLAY"), "X11 display")
-		file = flag.String("file", "/tmp/track.bin", "tracking file")
-	)
-	flag.Parse()
-	StartTracker(*display, *file)
-}
