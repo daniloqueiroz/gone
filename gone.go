@@ -122,6 +122,7 @@ func (t Tracker) Cleanup(every, since time.Duration) {
 
 func (t Tracker) Start() {
 	defer t.store()
+	defer t.x.Close()
 
 	go t.x.Collect(t, time.Minute*5)
 	go t.Cleanup(time.Minute, time.Hour*24*7)
@@ -129,7 +130,6 @@ func (t Tracker) Start() {
 
 func NewTracker(display, trackingFile string) (*Tracker, error) {
 	X := Connect(display)
-	defer X.Close()
 	var w Window
 
 	tracker := &Tracker{
