@@ -124,8 +124,8 @@ func (t Tracker) Start() {
 	defer t.store()
 	defer t.x.Close()
 
-	go t.x.Collect(t, time.Minute*5)
 	go t.Cleanup(time.Minute, time.Hour*24*7)
+	t.x.Collect(t, time.Minute*5)
 }
 
 func NewTracker(display, trackingFile string) (*Tracker, error) {
