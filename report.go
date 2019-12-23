@@ -1,7 +1,6 @@
 package gone
 
 import (
-	"fmt"
 	"sort"
 	"time"
 )
@@ -9,31 +8,27 @@ import (
 type Report struct {
 	Records Records
 	Classes Classes
-	Total   Duration
-	Idle    Duration
-	Zzz     bool
-	Refresh time.Duration
+	Total   time.Duration
+	Idle    time.Duration
 }
 
 type Record struct {
 	Class string
 	Name  string
-	Spent Duration
-	Idle  Duration
+	Spent time.Duration
+	Idle  time.Duration
 	Seen  time.Time
 }
 
 type Class struct {
 	Class   string
-	Spent   Duration
+	Spent   time.Duration
 	Percent float64
 }
 
 type Records []Record
 
 type Classes []Class
-
-type Duration time.Duration
 
 func (r Records) Len() int           { return len(r) }
 func (r Records) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
@@ -43,32 +38,26 @@ func (c Classes) Len() int           { return len(c) }
 func (c Classes) Swap(i, j int)      { c[i], c[j] = c[j], c[i] }
 func (c Classes) Less(i, j int) bool { return c[i].Spent < c[j].Spent }
 
-func (d Duration) String() string {
-	return fmt.Sprint(time.Duration(d).Truncate(time.Second))
-}
-
-func GenerateReport(tracker *Tracker) Report {
+func GenerateReport(recorder *Recorder) Report {
 	var idx Report
-	idx.Zzz = tracker.zzz
-	idx.Refresh = time.Minute // TODO use flag value
-
 	classes := make(map[string]time.Duration)
 
-	for k, v := range tracker.tracks {
-		classes[k.Class] += v.Spent
-		idx.Total += Duration(v.Spent)
-		idx.Idle += Duration(v.Idle)
+	for window := range recorder.tracks.Keys() {
+		rec, _ := recorder.tracks.Get(window)
+		classes[window.Class] += rec.Spent
+		idx.Total += rec.Spent
+		idx.Idle += rec.Idle
 
 		idx.Records = append(idx.Records, Record{
-			Class: k.Class,
-			Name:  k.Name,
-			Spent: Duration(v.Spent),
-			Idle:  Duration(v.Idle)})
+			Class: window.Class,
+			Name:  window.Name,
+			Spent: rec.Spent,
+			Idle:  rec.Idle})
 	}
 	for k, v := range classes {
 		idx.Classes = append(idx.Classes, Class{
 			Class:   k,
-			Spent:   Duration(v),
+			Spent:   v,
 			Percent: 100.0 * float64(v) / float64(idx.Total)})
 	}
 	sort.Sort(sort.Reverse(idx.Classes))
