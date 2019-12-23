@@ -57,7 +57,7 @@ func (t *TrackStore) Put(win *Window, rec *Track) error {
 func (t *TrackStore) Get(win *Window) (*Track, error) {
 	data, err := t.db.Get(t.getKey(win))
 	if err != nil {
-		logger.Errorf("Unable to retrieve track: %v", err)
+		logger.Errorf("Unable to retrieve track %s: %v", t.getKey(win), err)
 		return nil, err
 	}
 	var track *Track

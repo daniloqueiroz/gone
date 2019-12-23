@@ -28,7 +28,7 @@ type Recorder struct {
 }
 
 func (r Recorder) Snooze(idle time.Duration) {
-	if !r.zzz {
+	if r.active != nil && !r.zzz && r.tracks.Has(r.active) {
 		track, err := r.tracks.Get(r.active)
 		if err == nil {
 			track.Idle += idle
@@ -39,7 +39,7 @@ func (r Recorder) Snooze(idle time.Duration) {
 }
 
 func (r Recorder) Wakeup() {
-	if r.zzz {
+	if r.active != nil && r.zzz && r.tracks.Has(r.active) {
 		track, err := r.tracks.Get(r.active)
 		if err == nil {
 			track.Seen = time.Now()
@@ -66,7 +66,6 @@ func (r Recorder) Update(w Window) {
 		newTrack.Seen = time.Now()
 	}
 }
-
 
 func (r Recorder) Start() {
 	defer r.x.Close()
