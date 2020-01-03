@@ -1,12 +1,11 @@
 package gone
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/google/logger"
 	"github.com/prologic/bitcask"
-	"strings"
-	"time"
 )
 
 const (
@@ -21,6 +20,7 @@ func NewTrackStore(storageDir string) (*TrackStore, error) {
 	opts := []bitcask.Option{
 		bitcask.WithMaxDatafileSize(10 << 20),
 		bitcask.WithSync(true),
+		bitcask.WithMaxKeySize(256),
 	}
 	bc, err := bitcask.Open(storageDir, opts...)
 	if err != nil {
@@ -28,62 +28,76 @@ func NewTrackStore(storageDir string) (*TrackStore, error) {
 		return nil, err
 	}
 	store := &TrackStore{db: bc}
-	go store.compact()
 	return store, nil
 }
 
 func (t *TrackStore) compact() {
-	tick := time.NewTicker(1 * time.Hour)
-	defer tick.Stop()
-	for range tick.C {
-		// TODO remove old entries before merge
-		t.db.Merge()
+	logger.Infof("Compacting TrackStore")
+	t.db.Merge()
+}
+
+func (t *TrackStore) getKey(win Window) []byte {
+	bytes := make([]byte, 32)
+	hash := sha256.Sum256([]byte(fmt.Sprint(win.Class, win.Name)))
+	for i, b := range hash {
+		bytes[i] = b
 	}
+	return bytes
 }
 
-func (t *TrackStore) getKey(win *Window) []byte {
-	return []byte(fmt.Sprint(win.Class, separator, win.Name))
-}
-
-func (t *TrackStore) Put(win *Window, rec *Track) error {
-	data, err := json.Marshal(rec)
-	if err != nil {
-		logger.Errorf("Unable to serialize track: %v", err)
-		return err
-	}
-	return t.db.Put(t.getKey(win), data)
-}
-
-func (t *TrackStore) Get(win *Window) (*Track, error) {
+func (t *TrackStore) Get(win Window) (*Track, error) {
 	data, err := t.db.Get(t.getKey(win))
 	if err != nil {
 		logger.Errorf("Unable to retrieve track %s: %v", t.getKey(win), err)
 		return nil, err
 	}
-	var track *Track
-	err = json.Unmarshal(data, track)
+	return deserialize(data)
+}
+
+func (t *TrackStore) Put(rec *Track) error {
+	data, err := serialize(rec)
+	if err != nil {
+		return err
+	}
+	return t.db.Put(t.getKey(rec.Window), data)
+}
+
+func (t *TrackStore) Has(win Window) bool {
+	return t.db.Has(t.getKey(win))
+}
+
+func (t *TrackStore) Tracks() chan *Track {
+	chn := make(chan *Track)
+	go func() {
+		defer close(chn)
+		for key := range t.db.Keys() {
+			data, _ := t.db.Get(key)
+			track, _ := deserialize(data)
+			chn <- track
+		}
+	}()
+	return chn
+}
+
+func (t *TrackStore) Len() int {
+	return t.db.Len()
+}
+
+func serialize(track *Track) ([]byte, error) {
+	data, err := json.Marshal(track)
+	if err != nil {
+		logger.Errorf("Unable to serialize track: %v", err)
+		return nil, err
+	}
+	return data, nil
+}
+
+func deserialize(data []byte) (*Track, error) {
+	var track Track
+	err := json.Unmarshal(data, &track)
 	if err != nil {
 		logger.Errorf("Unable to deserialize track: %v", err)
 		return nil, err
 	}
-	return track, nil
-}
-
-func (t *TrackStore) Has(win *Window) bool {
-	return t.db.Has(t.getKey(win))
-}
-
-func (t *TrackStore) Keys() chan *Window {
-	keys := make(chan *Window)
-	go func() {
-		defer close(keys)
-		for key := range t.db.Keys() {
-			str := strings.Split(string(key), separator)
-			keys <- &Window{
-				Class: str[0],
-				Name:  str[1],
-			}
-		}
-	}()
-	return keys
+	return &track, nil
 }

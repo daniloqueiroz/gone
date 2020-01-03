@@ -13,9 +13,9 @@ import (
 )
 
 type WindowTracker interface {
-	Update(Window)
 	Snooze(time.Duration)
 	Wakeup()
+	Update(w Window)
 }
 
 
